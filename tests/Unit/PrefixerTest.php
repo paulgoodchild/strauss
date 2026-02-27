@@ -2028,6 +2028,141 @@ EOD;
     }
 
     /**
+     * Ensure multiple global function symbols are replaced in one pass without touching class methods.
+     */
+    public function testReplaceMultipleFunctionsAndKeepMethodsUntouched(): void
+    {
+        $contents = <<<'EOD'
+<?php
+if (! function_exists('first_fn')) {
+    function first_fn()
+    {
+        return 1;
+    }
+}
+if (! function_exists('second_fn')) {
+    function second_fn()
+    {
+        return 2;
+    }
+}
+
+class ExampleClass
+{
+    public function first_fn()
+    {
+        return 'method';
+    }
+}
+
+$a = first_fn();
+$b = second_fn();
+call_user_func('first_fn');
+call_user_func_array('second_fn', []);
+$c = (new ExampleClass())->first_fn();
+EOD;
+
+        $expected = <<<'EOD'
+<?php
+if (! function_exists('pref_first_fn')) {
+    function pref_first_fn()
+    {
+        return 1;
+    }
+}
+if (! function_exists('pref_second_fn')) {
+    function pref_second_fn()
+    {
+        return 2;
+    }
+}
+
+class ExampleClass
+{
+    public function first_fn()
+    {
+        return 'method';
+    }
+}
+
+$a = pref_first_fn();
+$b = pref_second_fn();
+call_user_func('pref_first_fn');
+call_user_func_array('pref_second_fn', []);
+$c = (new ExampleClass())->first_fn();
+EOD;
+
+        $config = $this->createMock(PrefixerConfigInterface::class);
+
+        $symbols = new DiscoveredSymbols();
+
+        $fileMock = $this->createMock(File::class);
+        $fileMock->expects($this->any())
+            ->method('isDoPrefix')
+            ->willReturn(true);
+
+        $firstFunctionSymbol = new FunctionSymbol('first_fn', $fileMock);
+        $firstFunctionSymbol->setReplacement('pref_first_fn');
+        $symbols->add($firstFunctionSymbol);
+
+        $secondFunctionSymbol = new FunctionSymbol('second_fn', $fileMock);
+        $secondFunctionSymbol->setReplacement('pref_second_fn');
+        $symbols->add($secondFunctionSymbol);
+
+        $replacer = new Prefixer($config, $this->getInMemoryFileSystem());
+
+        $result = $replacer->replaceInString($symbols, $contents);
+
+        $this->assertEqualsRN($expected, $result);
+    }
+
+    public function testReplaceFunctionsPreservesLegacyCascadingBehavior(): void
+    {
+        $contents = <<<'EOD'
+<?php
+function foo() {}
+function pref_foo() {}
+
+foo();
+pref_foo();
+call_user_func('foo');
+EOD;
+
+        $expected = <<<'EOD'
+<?php
+function pref_pref_foo() {}
+function pref_pref_foo() {}
+
+pref_pref_foo();
+pref_pref_foo();
+call_user_func('pref_pref_foo');
+EOD;
+
+        $config = $this->createMock(PrefixerConfigInterface::class);
+
+        $symbols = new DiscoveredSymbols();
+
+        $fileMock = $this->createMock(File::class);
+        $fileMock->expects($this->any())
+            ->method('isDoPrefix')
+            ->willReturn(true);
+
+        $firstFunctionSymbol = new FunctionSymbol('foo', $fileMock);
+        $firstFunctionSymbol->setReplacement('pref_foo');
+        $symbols->add($firstFunctionSymbol);
+
+        $secondFunctionSymbol = new FunctionSymbol('pref_foo', $fileMock);
+        $secondFunctionSymbol->setReplacement('pref_pref_foo');
+        $symbols->add($secondFunctionSymbol);
+
+        $replacer = new Prefixer($config, $this->getInMemoryFileSystem());
+
+        $result = $replacer->replaceInString($symbols, $contents);
+
+        $this->assertEqualsRN($expected, $result);
+    }
+
+    /**
      * @covers ::prepareRelativeNamespaces
      */
     public function testPrepareRelativeNamespaces(): void

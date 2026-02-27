@@ -47,9 +47,14 @@ class FileSymbolScanner
     protected array $builtIns = [];
 
     /**
-     * @var string[]
+     * @var array<string,bool>
      */
     protected array $loggedSymbols = [];
+
+    /**
+     * @var array<string,bool>
+     */
+    protected array $builtInsLookup = [];
 
     /**
      * FileScanner constructor.
@@ -73,10 +78,11 @@ class FileSymbolScanner
     {
         $this->discoveredSymbols->add($symbol);
 
-        $level = in_array($symbol->getOriginalSymbol(), $this->loggedSymbols) ? 'debug' : 'info';
-        $newText = in_array($symbol->getOriginalSymbol(), $this->loggedSymbols) ? '' : 'new ';
+        $isAlreadyLogged = isset($this->loggedSymbols[$symbol->getOriginalSymbol()]);
+        $level = $isAlreadyLogged ? 'debug' : 'info';
+        $newText = $isAlreadyLogged ? '' : 'new ';
 
-        $this->loggedSymbols[] = $symbol->getOriginalSymbol();
+        $this->loggedSymbols[$symbol->getOriginalSymbol()] = true;
 
         $this->logger->log(
             $level,
@@ -152,7 +158,7 @@ class FileSymbolScanner
             /** @var PHPFunction[] $phpFunctions */
             $phpFunctions = $phpCode->getFunctions();
             foreach ($phpFunctions as $functionName => $function) {
-                if (in_array($functionName, $this->getBuiltIns())) {
+                if ($this->isBuiltInSymbol($functionName)) {
                     continue;
                 }
                 $functionSymbol = new FunctionSymbol($functionName, $file, $namespaceName, $package);
@@ -237,7 +243,7 @@ class FileSymbolScanner
         array $interfaces
     ): void {
         // TODO: This should be included but marked not to prefix.
-        if (in_array($fqdnClassname, $this->getBuiltIns())) {
+        if ($this->isBuiltInSymbol($fqdnClassname)) {
             return;
         }
 
@@ -310,5 +316,15 @@ class FileSymbolScanner
         );
 
         $this->builtIns = $flatArray;
+        $this->builtInsLookup = array_fill_keys($this->builtIns, true);
+    }
+
+    protected function isBuiltInSymbol(string $symbolName): bool
+    {
+        if (empty($this->builtInsLookup)) {
+            $this->loadBuiltIns();
+        }
+
+        return isset($this->builtInsLookup[$symbolName]);
     }
 }
