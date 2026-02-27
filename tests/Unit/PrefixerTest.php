@@ -2162,6 +2162,80 @@ EOD;
         $this->assertEqualsRN($expected, $result);
     }
 
+    public function testReplaceFunctionsLeavesUnmappedCallableStringsUnchanged(): void
+    {
+        $contents = <<<'EOD'
+<?php
+function mapped_fn() {}
+
+mapped_fn();
+function_exists('mapped_fn');
+call_user_func('mapped_fn');
+
+function_exists('unmapped_fn');
+call_user_func('unmapped_fn');
+EOD;
+
+        $expected = <<<'EOD'
+<?php
+function pref_mapped_fn() {}
+
+pref_mapped_fn();
+function_exists('pref_mapped_fn');
+call_user_func('pref_mapped_fn');
+
+function_exists('unmapped_fn');
+call_user_func('unmapped_fn');
+EOD;
+
+        $config = $this->createMock(PrefixerConfigInterface::class);
+
+        $symbols = new DiscoveredSymbols();
+
+        $fileMock = $this->createMock(File::class);
+        $fileMock->expects($this->any())
+            ->method('isDoPrefix')
+            ->willReturn(true);
+
+        $functionSymbol = new FunctionSymbol('mapped_fn', $fileMock);
+        $functionSymbol->setReplacement('pref_mapped_fn');
+        $symbols->add($functionSymbol);
+
+        $replacer = new Prefixer($config, $this->getInMemoryFileSystem());
+
+        $result = $replacer->replaceInString($symbols, $contents);
+
+        $this->assertEqualsRN($expected, $result);
+    }
+
+    public function testReplaceNamespaceHandlesEscapedStringsThroughPrefilter(): void
+    {
+        $contents = <<<'EOD'
+<?php
+$singleEscaped = '\Vendor\Package\ClassName';
+$doubleEscaped = '\\Vendor\\Package\\ClassName';
+EOD;
+
+        $config = $this->createMock(PrefixerConfigInterface::class);
+
+        $symbols = new DiscoveredSymbols();
+
+        $fileMock = $this->createMock(File::class);
+        $fileMock->expects($this->any())
+            ->method('isDoPrefix')
+            ->willReturn(true);
+
+        $namespaceSymbol = new NamespaceSymbol('Vendor\Package', $fileMock);
+        $namespaceSymbol->setReplacement('Pref\Vendor\Package');
+        $symbols->add($namespaceSymbol);
+
+        $replacer = new Prefixer($config, $this->getInMemoryFileSystem());
+        $result = $replacer->replaceInString($symbols, $contents);
+
+        $this->assertStringContainsString('\Pref\Vendor\Package\ClassName', $result);
+        $this->assertStringContainsString('\\Pref\\Vendor\\Package\\ClassName', $result);
+    }
+
     /**
      * @covers ::prepareRelativeNamespaces
      */
