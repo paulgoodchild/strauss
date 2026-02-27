@@ -7,11 +7,11 @@ use BrianHenryIE\Strauss\Composer\Extra\StraussConfig;
 use BrianHenryIE\Strauss\Config\FileSymbolScannerConfigInterface;
 use BrianHenryIE\Strauss\Files\DiscoveredFiles;
 use BrianHenryIE\Strauss\Files\File;
+use BrianHenryIE\Strauss\Files\FileWithDependency;
 use BrianHenryIE\Strauss\Helpers\FileSystem;
 use BrianHenryIE\Strauss\TestCase;
 use BrianHenryIE\Strauss\Types\DiscoveredSymbols;
 use BrianHenryIE\Strauss\Types\NamespaceSymbol;
-use League\Flysystem\FilesystemReader;
 use Mockery;
 
 /**
@@ -576,7 +576,7 @@ EOD;
      *
      * @covers ::findInFiles
      */
-    public function it_does_not_replace_inside_named_namespace_but_does_inside_explicit_global_namespace_a(): void
+    public function testDoesNotReplaceInsideNamedNamespaceButDoesInsideExplicitGlobalNamespaceA(): void
     {
 
         $contents = "
@@ -590,11 +590,15 @@ EOD;
 		";
 
 
-        $filesystemReaderMock = Mockery::mock(FilesystemReader::class);
+        $filesystemReaderMock = Mockery::mock(FileSystem::class);
         $filesystemReaderMock->expects('read')->once()->andReturn($contents);
+        $filesystemReaderMock->expects('getRelativePath')->once()->andReturnArg(1);
 
-        $config = $this->createMock(StraussConfig::class);
-        $sut = new FileSymbolScanner($config, $filesystemReaderMock);
+        $config = $this->createMock(FileSymbolScannerConfigInterface::class);
+        $config->method('getProjectDirectory')->willReturn('/project');
+        $config->method('getPackagesToPrefix')->willReturn([]);
+        $discoveredSymbols = new DiscoveredSymbols();
+        $sut = new FileSymbolScanner($config, $discoveredSymbols, $filesystemReaderMock);
 
         $file = Mockery::mock(File::class);
         $file->shouldReceive('isPhpFile')->andReturnTrue();
@@ -615,75 +619,94 @@ EOD;
     /**
      * @covers ::findInFiles
      */
-    public function testExcludePackagesFromPrefix()
+    public function testNonPhpFileSetsDoPrefixFalseAndSkipsRead(): void
     {
-
         $filesystemReaderMock = Mockery::mock(Filesystem::class);
-        $filesystemReaderMock->expects('read')->once()->andReturn('');
-        $filesystemReaderMock->expects('getRelativePath')->once()->andReturnArg(1);
+        $filesystemReaderMock->expects('read')->never();
+        $filesystemReaderMock->expects('getRelativePath')->once()->andReturn('vendor/vendor-a/readme.txt');
 
-        $config = $this->createMock(StraussConfig::class);
-        $config->method('getExcludePackagesFromPrefixing')->willReturn(
-            array('brianhenryie/pdfhelpers')
-        );
-
-        $composerPackage = $this->createMock(ComposerPackage::class);
-        $composerPackage->method('getPackageName')->willReturn('brianhenryie/pdfhelpers');
-
-        $file = Mockery::mock(File::class);
-        $file->shouldReceive('isPhpFile')->andReturnTrue();
-        $file->shouldReceive('getSourcePath')->andReturn('/a/path');
-
-        $file->shouldReceive('addDiscoveredSymbol')
-             ->withArgs(fn($v) => $v instanceof NamespaceSymbol && $v->getOriginalSymbol() === '\\')
-             ->once();
-
-        $files = Mockery::mock(DiscoveredFiles::class)->makePartial();
-        $files->shouldReceive('getFiles')->andReturn([$file]);
+        $config = $this->createMock(FileSymbolScannerConfigInterface::class);
+        $config->method('getProjectDirectory')->willReturn('/project');
+        $config->method('getPackagesToPrefix')->willReturn([]);
 
         $discoveredSymbols = new DiscoveredSymbols();
-
         $sut = new FileSymbolScanner($config, $discoveredSymbols, $filesystemReaderMock);
+
+        /** @var File&\Mockery\MockInterface $file */
+        $file = Mockery::mock(File::class);
+        $file->shouldReceive('isPhpFile')->once()->andReturnFalse();
+        $file->shouldReceive('getSourcePath')->andReturn('/a/path');
+        $file->shouldReceive('setDoPrefix')->with(false)->once();
+        $file->shouldReceive('addDiscoveredSymbol')->never();
+        $file->shouldReceive('getDependency')->never();
+        $file->shouldReceive('getTargetRelativePath')->never();
+
+        $files = Mockery::mock(DiscoveredFiles::class);
+        $files->shouldReceive('getFiles')->once()->andReturn([$file]);
+
         $result = $sut->findInFiles($files);
 
         self::assertEmpty($result->getDiscoveredNamespaces());
+        self::assertEmpty($result->getDiscoveredClasses());
+        self::assertEmpty($result->getDiscoveredFunctions());
     }
 
     /**
      * @covers ::findInFiles
      */
-    public function testExcludeFilePatternsFromPrefix()
+    public function testParserReuseDoesNotLeakNamespacesAcrossFiles(): void
     {
-        $filesystemReaderMock = Mockery::mock(Filesystem::class);
-        $filesystemReaderMock->expects('read')->once()->andReturn('');
-        $filesystemReaderMock->expects('getRelativePath')->once()->andReturnArg(1);
+        $firstContents = <<<'EOD'
+<?php
+namespace FirstNs {
+    class FirstNamespaced {}
+}
+namespace {
+    class FirstGlobal {}
+}
+EOD;
+
+        $secondContents = <<<'EOD'
+<?php
+namespace SecondNs {
+    class SecondNamespaced {}
+}
+namespace {
+    class SecondGlobal {}
+}
+EOD;
+
+        $filesystemReaderMock = Mockery::mock(FileSystem::class);
+        $filesystemReaderMock->expects('read')->twice()->andReturn($firstContents, $secondContents);
+        $filesystemReaderMock->expects('getRelativePath')->twice()->andReturn('vendor/vendor-a/one.php', 'vendor/vendor-a/two.php');
 
         $config = $this->createMock(StraussConfig::class);
-        $config->method('getExcludeFilePatternsFromPrefixing')->willReturn(
-            array('/to/')
-        );
-
-        $composerPackage = $this->createMock(ComposerPackage::class);
-        $composerPackage->method('getPackageName')->willReturn('brianhenryie/pdfhelpers');
-
-//        $file = new File($composerPackage, 'path/to/file', 'irrelevantPath');
-        $file = Mockery::mock(File::class);
-        $file->shouldReceive('isPhpFile')->andReturnTrue();
-        $file->shouldReceive('getSourcePath')->andReturn('/a/path');
-
-        $file->shouldReceive('addDiscoveredSymbol')
-             ->withArgs(fn($v) => $v instanceof NamespaceSymbol && $v->getOriginalSymbol() === '\\')
-             ->once();
-
-        $files = Mockery::mock(DiscoveredFiles::class)->makePartial();
-        $files->shouldReceive('getFiles')->andReturn([$file]);
-
         $discoveredSymbols = new DiscoveredSymbols();
-
         $sut = new FileSymbolScanner($config, $discoveredSymbols, $filesystemReaderMock);
-        $result = $sut->findInFiles($files);
 
-        self::assertEmpty($result->getDiscoveredNamespaces());
+        $fileOne = Mockery::mock(File::class);
+        $fileOne->shouldReceive('isPhpFile')->andReturnTrue();
+        $fileOne->shouldReceive('getTargetRelativePath');
+        $fileOne->shouldReceive('getDependency');
+        $fileOne->shouldReceive('addDiscoveredSymbol');
+        $fileOne->shouldReceive('getSourcePath')->andReturn('/a/path-one.php');
+
+        $fileTwo = Mockery::mock(File::class);
+        $fileTwo->shouldReceive('isPhpFile')->andReturnTrue();
+        $fileTwo->shouldReceive('getTargetRelativePath');
+        $fileTwo->shouldReceive('getDependency');
+        $fileTwo->shouldReceive('addDiscoveredSymbol');
+        $fileTwo->shouldReceive('getSourcePath')->andReturn('/a/path-two.php');
+
+        $discoveredFiles = Mockery::mock(DiscoveredFiles::class);
+        $discoveredFiles->shouldReceive('getFiles')->once()->andReturn([$fileOne, $fileTwo]);
+
+        $result = $sut->findInFiles($discoveredFiles);
+
+        self::assertArrayHasKey('FirstNs', $result->getDiscoveredNamespaces());
+        self::assertArrayHasKey('SecondNs', $result->getDiscoveredNamespaces());
+        self::assertContains('FirstGlobal', $result->getDiscoveredClasses());
+        self::assertContains('SecondGlobal', $result->getDiscoveredClasses());
     }
 
     /**
@@ -1089,5 +1112,99 @@ EOD;
         $result = $sut->findInFiles($discoveredFiles);
 
         self::assertArrayHasKey('twig_cycle', $result->getDiscoveredFunctions());
+    }
+
+    /**
+     * @covers ::findInFiles
+     */
+    public function testDependencyFileOutsidePackagesToPrefixSetsDoPrefixFalse(): void
+    {
+        $contents = <<<'EOD'
+<?php
+function scan_me() {
+    return true;
+}
+EOD;
+
+        $filesystemReaderMock = Mockery::mock(FileSystem::class);
+        $filesystemReaderMock->expects('read')->once()->andReturn($contents);
+        $filesystemReaderMock->expects('getRelativePath')->once()->andReturn('vendor/vendor-a/file.php');
+
+        $config = $this->createMock(FileSymbolScannerConfigInterface::class);
+        $config->method('getProjectDirectory')->willReturn('/project');
+        $config->method('getPackagesToPrefix')->willReturn([
+            'vendor/vendor-b' => $this->createMock(ComposerPackage::class),
+        ]);
+
+        $discoveredSymbols = new DiscoveredSymbols();
+        $sut = new FileSymbolScanner($config, $discoveredSymbols, $filesystemReaderMock);
+
+        /** @var ComposerPackage&\Mockery\MockInterface $dependency */
+        $dependency = Mockery::mock(ComposerPackage::class);
+        $dependency->shouldReceive('getPackageName')->andReturn('vendor/vendor-a');
+        $dependency->shouldReceive('getPackageAbsolutePath')->andReturn('/project/vendor/vendor-a/');
+        $dependency->shouldReceive('addFile')->once();
+
+        $file = new FileWithDependency(
+            $dependency,
+            'vendor/vendor-a/file.php',
+            '/project/vendor/vendor-a/file.php'
+        );
+        $file->setDoPrefix(true);
+
+        $discoveredFiles = new DiscoveredFiles();
+        $discoveredFiles->add($file);
+
+        $result = $sut->findInFiles($discoveredFiles);
+
+        self::assertArrayHasKey('scan_me', $result->getDiscoveredFunctions());
+        self::assertFalse($file->isDoPrefix());
+    }
+
+    /**
+     * @covers ::findInFiles
+     */
+    public function testDependencyFileInsidePackagesToPrefixDoesNotSetDoPrefixFalse(): void
+    {
+        $contents = <<<'EOD'
+<?php
+function scan_me_too() {
+    return true;
+}
+EOD;
+
+        $filesystemReaderMock = Mockery::mock(FileSystem::class);
+        $filesystemReaderMock->expects('read')->once()->andReturn($contents);
+        $filesystemReaderMock->expects('getRelativePath')->once()->andReturn('vendor/vendor-a/file.php');
+
+        /** @var ComposerPackage&\Mockery\MockInterface $dependency */
+        $dependency = Mockery::mock(ComposerPackage::class);
+        $dependency->shouldReceive('getPackageName')->andReturn('vendor/vendor-a');
+        $dependency->shouldReceive('getPackageAbsolutePath')->andReturn('/project/vendor/vendor-a/');
+        $dependency->shouldReceive('addFile')->once();
+
+        $config = $this->createMock(FileSymbolScannerConfigInterface::class);
+        $config->method('getProjectDirectory')->willReturn('/project');
+        $config->method('getPackagesToPrefix')->willReturn([
+            'vendor/vendor-a' => $dependency,
+        ]);
+
+        $discoveredSymbols = new DiscoveredSymbols();
+        $sut = new FileSymbolScanner($config, $discoveredSymbols, $filesystemReaderMock);
+
+        $file = new FileWithDependency(
+            $dependency,
+            'vendor/vendor-a/file.php',
+            '/project/vendor/vendor-a/file.php'
+        );
+        $file->setDoPrefix(true);
+
+        $discoveredFiles = new DiscoveredFiles();
+        $discoveredFiles->add($file);
+
+        $result = $sut->findInFiles($discoveredFiles);
+
+        self::assertArrayHasKey('scan_me_too', $result->getDiscoveredFunctions());
+        self::assertTrue($file->isDoPrefix());
     }
 }

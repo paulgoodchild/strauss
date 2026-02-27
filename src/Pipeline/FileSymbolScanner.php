@@ -23,6 +23,7 @@ use BrianHenryIE\Strauss\Types\NamespaceSymbol;
 use BrianHenryIE\Strauss\Types\TraitSymbol;
 use League\Flysystem\FilesystemException;
 use PhpParser\Node;
+use PhpParser\Parser;
 use PhpParser\ParserFactory;
 use PhpParser\PrettyPrinter\Standard;
 use Psr\Log\LoggerAwareTrait;
@@ -45,6 +46,8 @@ class FileSymbolScanner
 
     /** @var string[] */
     protected array $builtIns = [];
+
+    protected ?Parser $parser = null;
 
     /**
      * @var array<string,bool>
@@ -101,14 +104,19 @@ class FileSymbolScanner
      */
     public function findInFiles(DiscoveredFiles $files): DiscoveredSymbols
     {
+        $packagesToPrefixLookup = array_fill_keys(array_keys($this->config->getPackagesToPrefix()), true);
+        $projectDirectory = $this->config->getProjectDirectory();
+
         foreach ($files->getFiles() as $file) {
-            if ($file instanceof FileWithDependency && !in_array($file->getDependency()->getPackageName(), array_keys($this->config->getPackagesToPrefix()))) {
+            if ($file instanceof FileWithDependency
+                && !isset($packagesToPrefixLookup[$file->getDependency()->getPackageName()])
+            ) {
                 $doPrefix = false;
                 $file->setDoPrefix($doPrefix);
             }
 
             $relativeFilePath = $this->filesystem->getRelativePath(
-                $this->config->getProjectDirectory(),
+                $projectDirectory,
                 $file->getSourcePath()
             );
 
@@ -194,9 +202,7 @@ class FileSymbolScanner
     {
         $result = [];
 
-        $parser = (new ParserFactory())->createForNewestSupportedVersion();
-
-        $ast = $parser->parse(trim($contents)) ?? [];
+        $ast = $this->getParser()->parse(trim($contents)) ?? [];
 
         foreach ($ast as $rootNode) {
             if ($rootNode instanceof Node\Stmt\Namespace_) {
@@ -326,5 +332,10 @@ class FileSymbolScanner
         }
 
         return isset($this->builtInsLookup[$symbolName]);
+    }
+
+    protected function getParser(): Parser
+    {
+        return $this->parser ??= (new ParserFactory())->createForNewestSupportedVersion();
     }
 }
