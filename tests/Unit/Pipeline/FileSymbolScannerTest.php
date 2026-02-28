@@ -1117,6 +1117,85 @@ EOD;
     /**
      * @covers ::findInFiles
      */
+    public function testStringContainingNamespaceKeywordIsIgnored(): void
+    {
+        $contents = <<<'EOD'
+<?php
+$statement = "namespace Fake\Namespace;";
+
+function keep_global() {
+    return true;
+}
+EOD;
+
+        $filesystemReaderMock = Mockery::mock(FileSystem::class);
+        $filesystemReaderMock->expects('read')->once()->andReturn($contents);
+        $filesystemReaderMock->expects('getRelativePath')->once()->andReturnArg(1);
+
+        $discoveredSymbols = new DiscoveredSymbols();
+
+        $config = $this->createMock(FileSymbolScannerConfigInterface::class);
+        $sut = new FileSymbolScanner($config, $discoveredSymbols, $filesystemReaderMock);
+
+        $file = Mockery::mock(File::class);
+        $file->shouldReceive('isPhpFile')->andReturnTrue();
+        $file->shouldReceive('getTargetRelativePath');
+        $file->shouldReceive('getDependency');
+        $file->shouldReceive('addDiscoveredSymbol');
+        $file->shouldReceive('getSourcePath')->andReturn('/a/path');
+
+        $discoveredFiles = Mockery::mock(DiscoveredFiles::class);
+        $discoveredFiles->shouldReceive('getFiles')->andReturn([$file]);
+
+        $result = $sut->findInFiles($discoveredFiles);
+
+        self::assertEmpty($result->getDiscoveredNamespaces());
+        self::assertArrayHasKey('keep_global', $result->getDiscoveredFunctions());
+    }
+
+    /**
+     * @covers ::findInFiles
+     */
+    public function testNamespaceOperatorDoesNotCreateAdditionalNamespace(): void
+    {
+        $contents = <<<'EOD'
+<?php
+namespace Demo;
+
+function read_length(string $input): int {
+    return namespace\strlen($input);
+}
+EOD;
+
+        $filesystemReaderMock = Mockery::mock(FileSystem::class);
+        $filesystemReaderMock->expects('read')->once()->andReturn($contents);
+        $filesystemReaderMock->expects('getRelativePath')->once()->andReturnArg(1);
+
+        $discoveredSymbols = new DiscoveredSymbols();
+
+        $config = $this->createMock(FileSymbolScannerConfigInterface::class);
+        $sut = new FileSymbolScanner($config, $discoveredSymbols, $filesystemReaderMock);
+
+        $file = Mockery::mock(File::class);
+        $file->shouldReceive('isPhpFile')->andReturnTrue();
+        $file->shouldReceive('getTargetRelativePath');
+        $file->shouldReceive('getDependency');
+        $file->shouldReceive('addDiscoveredSymbol');
+        $file->shouldReceive('getSourcePath')->andReturn('/a/path');
+
+        $discoveredFiles = Mockery::mock(DiscoveredFiles::class);
+        $discoveredFiles->shouldReceive('getFiles')->andReturn([$file]);
+
+        $result = $sut->findInFiles($discoveredFiles);
+
+        self::assertArrayHasKey('Demo', $result->getDiscoveredNamespaces());
+        self::assertArrayNotHasKey('strlen', $result->getDiscoveredNamespaces());
+        self::assertArrayHasKey('Demo\\read_length', $result->getDiscoveredFunctions());
+    }
+
+    /**
+     * @covers ::findInFiles
+     */
     public function testDependencyFileOutsidePackagesToPrefixSetsDoPrefixFalse(): void
     {
         $contents = <<<'EOD'
@@ -1128,7 +1207,7 @@ EOD;
 
         $filesystemReaderMock = Mockery::mock(FileSystem::class);
         $filesystemReaderMock->expects('read')->once()->andReturn($contents);
-        $filesystemReaderMock->expects('getRelativePath')->once()->andReturn('vendor/vendor-a/file.php');
+        $filesystemReaderMock->expects('getRelativePath')->never();
 
         $config = $this->createMock(FileSymbolScannerConfigInterface::class);
         $config->method('getProjectDirectory')->willReturn('/project');
@@ -1175,7 +1254,7 @@ EOD;
 
         $filesystemReaderMock = Mockery::mock(FileSystem::class);
         $filesystemReaderMock->expects('read')->once()->andReturn($contents);
-        $filesystemReaderMock->expects('getRelativePath')->once()->andReturn('vendor/vendor-a/file.php');
+        $filesystemReaderMock->expects('getRelativePath')->never();
 
         /** @var ComposerPackage&\Mockery\MockInterface $dependency */
         $dependency = Mockery::mock(ComposerPackage::class);
