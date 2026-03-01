@@ -29,6 +29,8 @@ class TestCase extends \PHPUnit\Framework\TestCase
      */
     protected TestLogger $testLogger;
 
+    protected FileSystem $filesystem;
+
     protected FileSystem $inMemoryFilesystem;
 
     public static function assertEqualsRN($expected, $actual, string $message = ''): void

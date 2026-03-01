@@ -61,6 +61,29 @@ class ComposerPackageTest extends TestCase
         self::assertNotContains('php', $requiresNames);
     }
 
+    public function testGetRequiresNamesKeepsPhpVariants()
+    {
+        $composer = ComposerPackage::fromComposerJsonArray(
+            [
+                'name' => 'acme/test',
+                'type' => 'library',
+                'require' => [
+                    'php' => '^8.0',
+                    'php-64bit' => '*',
+                    'ext-json' => '*',
+                    'acme/dep' => '^1.0',
+                ],
+            ]
+        );
+
+        $requiresNames = $composer->getRequiresNames();
+
+        self::assertContains('php-64bit', $requiresNames);
+        self::assertContains('acme/dep', $requiresNames);
+        self::assertNotContains('php', $requiresNames);
+        self::assertNotContains('ext-json', $requiresNames);
+    }
+
 
     /**
      *
