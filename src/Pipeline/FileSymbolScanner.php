@@ -32,7 +32,11 @@ use Psr\Log\NullLogger;
 use BrianHenryIE\SimplePhpParser\Model\PHPClass;
 use BrianHenryIE\SimplePhpParser\Model\PHPConst;
 use BrianHenryIE\SimplePhpParser\Model\PHPFunction;
+use BrianHenryIE\SimplePhpParser\Parsers\Helper\ParserContainer;
+use BrianHenryIE\SimplePhpParser\Parsers\Helper\ParserErrorHandler;
+use BrianHenryIE\SimplePhpParser\Parsers\Helper\Utils;
 use BrianHenryIE\SimplePhpParser\Parsers\PhpCodeParser;
+use BrianHenryIE\SimplePhpParser\Parsers\Visitors\ASTVisitor;
 
 class FileSymbolScanner
 {
@@ -158,7 +162,7 @@ class FileSymbolScanner
         foreach ($namespaces as $namespaceName => $contents) {
             $this->addDiscoveredNamespaceChange($namespaceName, $file, $package);
 
-            $phpCode = PhpCodeParser::getFromString($contents);
+            $phpCode = $this->parsePhpCode($contents);
 
             /** @var PHPClass[] $phpClasses */
             $phpClasses = $phpCode->getClasses();
@@ -454,5 +458,33 @@ class FileSymbolScanner
     protected function getPrettyPrinter(): Standard
     {
         return $this->prettyPrinter ??= new Standard();
+    }
+
+    protected function parsePhpCode(string $contents): ParserContainer
+    {
+        $parserContainer = new ParserContainer();
+        $visitor = new ASTVisitor($parserContainer);
+
+        $result = PhpCodeParser::process($contents, null, $parserContainer, $visitor);
+        if (!$result instanceof ParserContainer && $result instanceof ParserErrorHandler) {
+            return $parserContainer;
+        }
+
+        $interfaces = $parserContainer->getInterfaces();
+        foreach ($interfaces as &$interface) {
+            $interface->parentInterfaces = $visitor->combineParentInterfaces($interface);
+        }
+        unset($interface);
+
+        $classes = &$parserContainer->getClassesByReference();
+        foreach ($classes as &$class) {
+            $class->interfaces = Utils::flattenArray(
+                $visitor->combineImplementedInterfaces($class),
+                false
+            );
+        }
+        unset($class);
+
+        return $parserContainer;
     }
 }
