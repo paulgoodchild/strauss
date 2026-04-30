@@ -525,6 +525,7 @@ class InstalledJson
             }
         }
 
+        $installedJsonArray = $this->reindexPackagesList($installedJsonArray);
         $installedJsonArray['dev'] = false;
         $installedJsonArray['dev-package-names'] = [];
 
@@ -579,11 +580,24 @@ class InstalledJson
         // Only relevant when source = target.
         $installedJsonArray = $this->updateNamespaces($installedJsonArray, $discoveredSymbols);
 
+        $installedJsonArray = $this->reindexPackagesList($installedJsonArray);
+
         if (!$this->config->isDryRun()) {
             $vendorInstalledJsonFile->write($installedJsonArray);
         }
 
         $this->logger->debug('Finished InstalledJson::cleanupVendorInstalledJson()');
+    }
+
+    /**
+     * @param InstalledJsonArray $installedJsonArray
+     * @return InstalledJsonArray
+     */
+    private function reindexPackagesList(array $installedJsonArray): array
+    {
+        $installedJsonArray['packages'] = array_values($installedJsonArray['packages']);
+
+        return $installedJsonArray;
     }
 
     private function resetPathCaches(): void
