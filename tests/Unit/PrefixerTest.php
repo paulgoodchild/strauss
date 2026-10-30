@@ -1852,6 +1852,60 @@ EOD;
     }
 
     /**
+     * A typed property declared with a fully qualified class name, in code and in code that generates code.
+     *
+     * Twig 3.x compiles each template to a class whose escaper property is typed. The compiler writes the
+     * declaration as a string, so when only the `getRuntime()` lookup beside it was prefixed, every compiled
+     * template failed with "Cannot assign Prefix\Twig\Runtime\EscaperRuntime to property ... of type
+     * Twig\Runtime\EscaperRuntime".
+     *
+     * @see vendor/twig/twig/src/Node/ModuleNode.php:209
+     */
+    public function testPrefixesFullNamespaceInTypedPropertyDeclaration(): void
+    {
+        $contents = <<<'EOD'
+<?php
+namespace Twig\Node;
+
+class ModuleNode
+{
+    private \Twig\Runtime\EscaperRuntime $escaper;
+
+    protected function compileConstructor(Compiler $compiler)
+    {
+        $compiler->write("private \\Twig\\Runtime\\EscaperRuntime \$escaper;\n");
+        $compiler->write("\$this->escaper = \$env->getRuntime('Twig\\Runtime\\EscaperRuntime');\n\n");
+    }
+}
+EOD;
+
+        $expected = <<<'EOD'
+<?php
+namespace Company\Project\Twig\Node;
+
+class ModuleNode
+{
+    private \Company\Project\Twig\Runtime\EscaperRuntime $escaper;
+
+    protected function compileConstructor(Compiler $compiler)
+    {
+        $compiler->write("private \\Company\\Project\\Twig\\Runtime\\EscaperRuntime \$escaper;\n");
+        $compiler->write("\$this->escaper = \$env->getRuntime('Company\\Project\\Twig\\Runtime\\EscaperRuntime');\n\n");
+    }
+}
+EOD;
+
+        $config = $this->createMock(PrefixerConfigInterface::class);
+
+        $replacer = new Prefixer($config, $this->getInMemoryFileSystem());
+
+        $result = $replacer->replaceNamespace($contents, 'Twig\\Node', 'Company\\Project\\Twig\\Node');
+        $result = $replacer->replaceNamespace($result, 'Twig\\Runtime', 'Company\\Project\\Twig\\Runtime');
+
+        self::assertEqualsRN($expected, $result);
+    }
+
+    /**
      * @see https://github.com/BrianHenryIE/strauss/issues/114
      * @see vendor-prefixed/aws/aws-sdk-php/src/Configuration/ConfigurationResolver.php:121
      */
