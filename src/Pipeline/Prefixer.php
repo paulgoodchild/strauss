@@ -404,6 +404,7 @@ class Prefixer
             |use\s+function\s+			   # the use function syntax
             |new\s+
             |static\s+
+            |\b(?:public|protected|private|readonly|var)\s+  # a typed property, also when code is generated in a string
             |\"                            # inside a string that does not contain spaces - needs work
             |'                             #   right now its just inside a string that doesnt start with a space
             |implements\s+\\\\             # when the interface being implemented is namespaced inline
